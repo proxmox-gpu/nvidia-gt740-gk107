@@ -121,7 +121,8 @@ check "ROM copied intact (sha256 host == guest)" test "$LOCAL_SHA" == "$GUEST_SH
 
 step "ROM check (lib/rom_check.py)"
 set +e
-python3 "$REPO_DIR/lib/rom_check.py" "$LOCAL" | tee "$WORK/check"
+OPTROM="${LOCAL%.rom}.optrom.rom"
+python3 "$REPO_DIR/lib/rom_check.py" "$LOCAL" --extract "$OPTROM" | tee "$WORK/check"
 set -e
 case $(sed -n 's/^ROM_STATUS=//p' "$WORK/check") in
   COMPLETE) pass "ROM complete, checksums ok" ;;
@@ -133,7 +134,12 @@ case $(sed -n 's/^UEFI_GOP=//p' "$WORK/check") in
   *) warn "UEFI GOP presence unknown" ;;
 esac
 
+if [[ -f $OPTROM ]]; then
+  info "option ROM without the nvflash header (form expected by QEMU romfile=): $OPTROM"
+else
+  OPTROM=$LOCAL
+fi
 info "to pass this ROM to the guest (not done by this script):"
-info "  cp '$LOCAL' /usr/share/kvm/gt740.rom"
+info "  cp '$OPTROM' /usr/share/kvm/gt740.rom"
 info "  qm set $VMID -hostpci0 mapping=$MAP,pcie=1,romfile=gt740.rom"
 summary

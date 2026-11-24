@@ -76,7 +76,14 @@ $bytes = [IO.File]::ReadAllBytes($rom)
 ''
 'ROM file     : {0} ({1} bytes)' -f $rom, $bytes.Length
 'ROM SHA256   : {0}' -f (Get-FileHash $rom -Algorithm SHA256).Hash
-if ($bytes.Length -lt 512 -or $bytes[0] -ne 0x55 -or $bytes[1] -ne 0xAA) { 'NOT_A_ROM: no 0x55AA header'; exit 6 }
+# nvflash dumps may start with a vendor header; the option ROM (0x55AA) follows it.
+# Only a sanity check here - the host (lib/rom_check.py) locates and validates the images.
+$hex = [BitConverter]::ToString($bytes, 0, [Math]::Min(16, $bytes.Length))
+'First bytes  : {0}' -f $hex
+$found = $false
+for ($i = 0; $i -lt $bytes.Length - 1; $i++) { if ($bytes[$i] -eq 0x55 -and $bytes[$i + 1] -eq 0xAA) { $found = $true; break } }
+if ($bytes.Length -lt 512 -or -not $found) { 'NOT_A_ROM: no 0x55AA header anywhere in the file'; exit 6 }
+'0x55AA at    : 0x{0:X}' -f $i
 [IO.File]::WriteAllText("$rom.b64", [Convert]::ToBase64String($bytes), [Text.Encoding]::ASCII)
 'BASE64       : {0}.b64' -f $rom
 exit 0

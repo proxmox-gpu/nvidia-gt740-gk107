@@ -173,7 +173,7 @@ if ((DUMP_ROM)); then
     if [[ -s $ROM ]]; then
       info "saved: $ROM ($(stat -c %s "$ROM") bytes, sha256 $(sha256sum "$ROM" | cut -c1-16)...)"
       out=$(rom_images "$ROM")
-      grep -vE '^(UEFI_GOP|ROM_STATUS)=' <<<"$out"
+      grep -vE '^(UEFI_GOP|ROM_STATUS|ROM_OFFSET)=' <<<"$out"
       case $(sed -n 's/^ROM_STATUS=//p' <<<"$out") in
         COMPLETE) pass "ROM dump complete, checksums ok" ;;
         TRUNCATED) warn "ROM dump is TRUNCATED - the ROM BAR does not return the whole image."
