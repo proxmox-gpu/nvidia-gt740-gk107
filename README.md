@@ -273,6 +273,7 @@ failed to reset PCI device '0000:01:00.0', but trying to continue as not all dev
 | Скрипт | Когда |
 | --- | --- |
 | `host/gpu-status.sh` | быстрый статус: драйвер на хосте, конфиг ВМ, журнал ядра по карте, функции NVIDIA в госте |
+| `host/diag-gpu.sh [--rom]` | карта видна в госте, но не стартует (код 43/10/31): сверка конфига ВМ с runbook, способы сброса, BAR/ROM/MSI, IOMMU-группа, interrupt remapping, журнал ядра; в госте — код и статус проблемы, пакет драйвера, события `nvlddmkm`/Kernel-PnP, `setupapi.dev.log`. Ничего не меняет. `--rom` (ВМ остановлена) — снимает ROM карты в `logs/` и проверяет наличие UEFI GOP |
 | `host/gx-test.sh` | проверить, что вывод гостя (кириллица) читается в консоли хоста |
 | `host/rescue-bsod-loop.sh` | гость в цикле BSOD: ловит окно агента и отключает драйвер (`nvlddmkm Start=4`) |
 | `host/fix-msi.sh` | MSI + политики RDP + `Start=3` + перезагрузка (после rescue, обновления драйвера, смены слота) |
@@ -302,6 +303,7 @@ failed to reset PCI device '0000:01:00.0', but trying to continue as not all dev
 | `PCI device mapping not found for '<имя>'` | опечатка в имени маппинга | сверить `MAP` и `/etc/pve/mapping/pci.cfg` |
 | ВМ не стартует: устройство занято | карту держит другая запущенная ВМ | остановить её или убрать её `hostpci` |
 | Видео `Error`, код 43 (`CM_PROB_FAILED_POST_START`), IRQ `INTx` | ВМ на i440fx (нет PCIe) | перевести на q35 + `pcie=1`, затем `fix-msi.sh` (новый InstanceId) |
+| Видео `Error`, код 43 (`CM_PROB_FAILED_POST_START`) на q35 + `pcie=1` | грязное состояние карты (нет способа сброса), отличия ВМ от runbook (`cpu`), нет UEFI GOP в ROM | `./host/diag-gpu.sh`, при остановленной ВМ — `./host/diag-gpu.sh --rom`; грязная карта — выключить хост по питанию и `qm start` |
 | Видео — код 31 `Microsoft Basic Display Adapter` | драйвер ещё не стоит | шаг 9–10 |
 | `NVIDIA GeForce GT 740`, код 14 `CM_PROB_NEED_RESTART` | драйвер ждёт перезагрузки | шаг 10 (MSI) → перезагрузка |
 | Установщик: `-2146869243` / подпись `UnknownError` | нет корня Entrust.net (2048) | шаг 10 делает это сам; вручную — повторить шаг 10 |
@@ -329,7 +331,7 @@ failed to reset PCI device '0000:01:00.0', but trying to continue as not all dev
 lib/common.sh        общие функции: логи, PASS/FAIL, ожидание агента, gx, guest_ps, снапшоты
 lib/gx_decode.py     декодер вывода гостя (CP866/UTF-8 -> UTF-8)
 host/NN-*.sh         шаги 1-12, запускаются на хосте по порядку
-host/*.sh            вспомогательные: gpu-status, gx-test, rescue-bsod-loop, fix-msi, rollback
+host/*.sh            вспомогательные: gpu-status, diag-gpu, gx-test, rescue-bsod-loop, fix-msi, rollback
 guest/*.ps1          PowerShell для гостя (ASCII), копируются и запускаются через агента
 logs/                логи запусков (в git не попадают)
 ```
