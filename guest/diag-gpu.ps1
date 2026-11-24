@@ -92,13 +92,16 @@ if (Test-Path $log) {
   if ($start -lt 0) {
     'no section for VEN_10DE&DEV_0FC8'
   } else {
-    $end = [Math]::Min($lines.Count - 1, $start + 400)
-    $sel = for ($i = $start; $i -le $end; $i++) {
+    $sel = for ($i = $start; $i -lt $lines.Count; $i++) {
       $lines[$i]
       if ($i -gt $start -and $lines[$i] -match '^<<<\s+\[Exit status') { break }
     }
-    # keep it short: header, errors/warnings, exit status
-    $sel | Where-Object { $_ -match '^(>>>|<<<)|!!!|\s!\s|error|fail' } | Select-Object -First 60
+    # headers and exit status always; warnings/errors without the file-queue cleanup noise
+    # ("flq: DeleteFile: FAILED" + "Error 2/3" for temp files that are already gone)
+    $sel | Where-Object { $_ -match '^(>>>|<<<)' }
+    $issues = @($sel | Where-Object { $_ -match '^!' -and $_ -notmatch 'flq:' })
+    'warnings/errors (without flq): {0}' -f $issues.Count
+    $issues | Select-Object -Last 40
   }
 } else {
   'setupapi.dev.log not found'

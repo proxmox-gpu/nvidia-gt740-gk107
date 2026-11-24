@@ -50,6 +50,17 @@ qm showcmd "$VMID" --pretty 2>/dev/null \
   | grep -E 'vfio-pci|-cpu |hv_|kvm=|-machine|romfile|x-vga|pcie-root-port|-device .*(ich9-pcie|pcie)' \
   | sed 's/^/    /' || warn "qm showcmd failed or printed nothing relevant"
 
+step "Last VM start task (QEMU / vfio warnings)"
+UPID=$(pvesh get "/nodes/$NODE/tasks" --vmid "$VMID" --typefilter qmstart --limit 1 --output-format json 2>/dev/null \
+  | python3 -c 'import json,sys; t=json.load(sys.stdin); print(t[0]["upid"] if t else "")' || true)
+if [[ -n $UPID ]]; then
+  info "$UPID"
+  pvesh get "/nodes/$NODE/tasks/$UPID/log" --output-format json 2>/dev/null \
+    | python3 -c 'import json,sys; [print("    "+l.get("t","")) for l in json.load(sys.stdin)]' || true
+else
+  info "no qmstart task found"
+fi
+
 step "Mapping '$MAP'"
 pvesh get "/cluster/mapping/pci/$MAP" --output-format json 2>/dev/null \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); [print("    "+m) for m in d.get("map",[])]' \
@@ -150,9 +161,24 @@ if ((DUMP_ROM)); then
     warn "a running VM holds the card - ROM dump skipped (stop the VM and rerun with --rom)"
   else
     ROM="$LOG_DIR/vbios-$BDF-$(date +%Y%m%d-%H%M%S).rom"
+    # vfio-pci puts an unused device into D3hot (kernel param vfio-pci.disable_idle_d3);
+    # in D3hot the ROM BAR reads as 0xffff. Bring it to D0 via PMCSR for the read, then restore.
+    PS_BEFORE=$(cat "$DEV/power_state" 2>/dev/null || echo unknown)
+    PMCSR=""
+    if [[ $PS_BEFORE != D0 ]]; then
+      PMCSR=$(setpci -s "$BDF.0" CAP_PM+4.w)
+      info "power state $PS_BEFORE (PMCSR=0x$PMCSR) -> D0 for the ROM read"
+      setpci -s "$BDF.0" CAP_PM+4.w=0000:0003
+      sleep 0.1
+    fi
     echo 1 >"$DEV/rom"
     cat "$DEV/rom" >"$ROM" 2>/dev/null || warn "reading $DEV/rom failed (ROM BAR not readable)"
     echo 0 >"$DEV/rom"
+    if [[ -n $PMCSR ]]; then
+      setpci -s "$BDF.0" CAP_PM+4.w="$PMCSR":0003
+      info "power state restored: $(cat "$DEV/power_state" 2>/dev/null || echo ?)"
+    fi
+    journalctl -k --since -1min --no-pager 2>/dev/null | grep -E "$BDF.*ROM" | sed 's/^/    /' || true
     if [[ -s $ROM ]]; then
       info "saved: $ROM ($(stat -c %s "$ROM") bytes, sha256 $(sha256sum "$ROM" | cut -c1-16)...)"
       out=$(rom_images "$ROM")
