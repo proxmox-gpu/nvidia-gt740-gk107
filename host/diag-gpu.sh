@@ -132,28 +132,7 @@ journalctl -k -b --no-pager -o short-iso 2>/dev/null \
   | grep -E "$BDF|vfio|DMAR|AER|BAR [0-9]| ROM | rom " | tail -60 | sed 's/^/    /' || true
 
 # ---------------------------------------------------------------- ROM ---
-rom_images() {
-  python3 - "$1" <<'PY'
-import sys
-data = open(sys.argv[1], 'rb').read()
-types = {0: 'x86 legacy BIOS', 1: 'Open Firmware', 2: 'PA-RISC', 3: 'UEFI (GOP)', 0x70: 'NVIDIA'}
-off, n, uefi = 0, 0, False
-while off + 0x1a <= len(data) and data[off:off + 2] == b'\x55\xaa':
-    p = off + int.from_bytes(data[off + 0x18:off + 0x1a], 'little')
-    if data[p:p + 4] != b'PCIR':
-        print(f'    image {n} @0x{off:x}: no PCIR structure'); break
-    vid = int.from_bytes(data[p + 4:p + 6], 'little'); did = int.from_bytes(data[p + 6:p + 8], 'little')
-    length = int.from_bytes(data[p + 0x10:p + 0x12], 'little') * 512
-    code = data[p + 0x14]; last = data[p + 0x15] & 0x80
-    uefi |= code == 3
-    print(f'    image {n} @0x{off:x}: {vid:04x}:{did:04x} type={code} ({types.get(code, "?")}) size={length}')
-    n += 1
-    if last or length == 0: break
-    off += length
-if n == 0: print('    no 0x55AA ROM signature - dump is empty or shadowed garbage')
-print('UEFI_GOP=' + ('1' if uefi else '0'))
-PY
-}
+rom_images() { python3 "$REPO_DIR/lib/rom_check.py" "$1" || true; }
 
 if ((DUMP_ROM)); then
   step "Card ROM"
@@ -171,9 +150,21 @@ if ((DUMP_ROM)); then
       setpci -s "$BDF.0" CAP_PM+4.w=0000:0003
       sleep 0.1
     fi
-    echo 1 >"$DEV/rom"
-    cat "$DEV/rom" >"$ROM" 2>/dev/null || warn "reading $DEV/rom failed (ROM BAR not readable)"
-    echo 0 >"$DEV/rom"
+    # read three times: an unstable ROM BAR gives different or truncated dumps
+    sums=()
+    for try in 1 2 3; do
+      echo 1 >"$DEV/rom"
+      if cat "$DEV/rom" >"$ROM.$try" 2>/dev/null; then :; else warn "read $try: $DEV/rom returned an I/O error after $(stat -c %s "$ROM.$try") bytes"; fi
+      echo 0 >"$DEV/rom"
+      sums+=("$(stat -c %s "$ROM.$try"):$(sha256sum "$ROM.$try" | cut -c1-16)")
+    done
+    info "reads (bytes:sha256): ${sums[*]}"
+    if [[ ${sums[0]} == "${sums[1]}" && ${sums[1]} == "${sums[2]}" ]]; then
+      pass "three ROM reads are identical"
+    else
+      warn "ROM reads differ - the ROM BAR is not read reliably"
+    fi
+    mv "$ROM.1" "$ROM"; rm -f "$ROM.2" "$ROM.3"
     if [[ -n $PMCSR ]]; then
       setpci -s "$BDF.0" CAP_PM+4.w="$PMCSR":0003
       info "power state restored: $(cat "$DEV/power_state" 2>/dev/null || echo ?)"
@@ -182,13 +173,19 @@ if ((DUMP_ROM)); then
     if [[ -s $ROM ]]; then
       info "saved: $ROM ($(stat -c %s "$ROM") bytes, sha256 $(sha256sum "$ROM" | cut -c1-16)...)"
       out=$(rom_images "$ROM")
-      grep -v '^UEFI_GOP=' <<<"$out"
-      if grep -q 'UEFI_GOP=1' <<<"$out"; then
-        pass "ROM contains a UEFI GOP image (OVMF can initialise the card)"
-      else
-        warn "ROM has no UEFI GOP image: OVMF does not initialise the card. Use a GOP-capable ROM"
-        warn "(vendor UEFI VBIOS) via hostpci0 romfile=, or a SeaBIOS VM."
-      fi
+      grep -vE '^(UEFI_GOP|ROM_STATUS)=' <<<"$out"
+      case $(sed -n 's/^ROM_STATUS=//p' <<<"$out") in
+        COMPLETE) pass "ROM dump complete, checksums ok" ;;
+        TRUNCATED) warn "ROM dump is TRUNCATED - the ROM BAR does not return the whole image."
+                   warn "QEMU passes the same ROM BAR to the guest; get a full dump (nvflash/GPU-Z on bare metal)." ;;
+        *) warn "ROM dump is INVALID (bad header or checksum)" ;;
+      esac
+      case $(sed -n 's/^UEFI_GOP=//p' <<<"$out") in
+        1) pass "ROM contains a UEFI GOP image (OVMF can initialise the card)" ;;
+        0) warn "ROM has no UEFI GOP image: OVMF does not initialise the card. Use a GOP-capable ROM"
+           warn "(vendor UEFI VBIOS) via hostpci0 romfile=, or a SeaBIOS VM." ;;
+        *) warn "UEFI GOP presence unknown (dump incomplete)" ;;
+      esac
     else
       rm -f "$ROM"
     fi

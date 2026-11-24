@@ -274,6 +274,8 @@ failed to reset PCI device '0000:01:00.0', but trying to continue as not all dev
 | --- | --- |
 | `host/gpu-status.sh` | быстрый статус: драйвер на хосте, конфиг ВМ, журнал ядра по карте, функции NVIDIA в госте |
 | `host/diag-gpu.sh [--rom]` | карта видна в госте, но не стартует (код 43/10/31): сверка конфига ВМ с runbook, способы сброса, BAR/ROM/MSI, IOMMU-группа, interrupt remapping, журнал ядра; в госте — код и статус проблемы, пакет драйвера, события `nvlddmkm`/Kernel-PnP, `setupapi.dev.log`. Ничего не меняет. `--rom` (ВМ остановлена) — снимает ROM карты в `logs/` и проверяет наличие UEFI GOP |
+| `host/dump-vbios.sh` | полный VBIOS карты через `nvflash64 --save` в госте (только чтение, карта не прошивается), когда `diag-gpu.sh --rom` даёт обрезанный образ. Zip «NVFlash for Windows» положить в `tools/nvflash.zip` (`NVFLASH_ZIP`), хеш закрепить в `NVFLASH_SHA256`. Результат — `logs/vbios-nvflash-*.rom` с проверкой целостности и UEFI GOP |
+| `lib/rom_check.py FILE` | проверить любой дамп ROM: цепочка образов, контрольные суммы, UEFI GOP, версия VBIOS |
 | `host/gx-test.sh` | проверить, что вывод гостя (кириллица) читается в консоли хоста |
 | `host/rescue-bsod-loop.sh` | гость в цикле BSOD: ловит окно агента и отключает драйвер (`nvlddmkm Start=4`) |
 | `host/fix-msi.sh` | MSI + политики RDP + `Start=3` + перезагрузка (после rescue, обновления драйвера, смены слота) |
@@ -304,6 +306,7 @@ failed to reset PCI device '0000:01:00.0', but trying to continue as not all dev
 | ВМ не стартует: устройство занято | карту держит другая запущенная ВМ | остановить её или убрать её `hostpci` |
 | Видео `Error`, код 43 (`CM_PROB_FAILED_POST_START`), IRQ `INTx` | ВМ на i440fx (нет PCIe) | перевести на q35 + `pcie=1`, затем `fix-msi.sh` (новый InstanceId) |
 | Видео `Error`, код 43 (`CM_PROB_FAILED_POST_START`) на q35 + `pcie=1` | грязное состояние карты (нет способа сброса), отличия ВМ от runbook (`cpu`), нет UEFI GOP в ROM | `./host/diag-gpu.sh`, при остановленной ВМ — `./host/diag-gpu.sh --rom`; грязная карта — выключить хост по питанию и `qm start` |
+| `diag-gpu.sh --rom`: `ROM dump is TRUNCATED`, в журнале ядра `Invalid PCI ROM header signature … got 0xffff` | ROM BAR карты читается не полностью; гость получает тот же обрезанный образ | `./host/dump-vbios.sh` → при `COMPLETE` подключить через `romfile=` (см. вывод скрипта); для пробы — `rombar=0` |
 | Видео — код 31 `Microsoft Basic Display Adapter` | драйвер ещё не стоит | шаг 9–10 |
 | `NVIDIA GeForce GT 740`, код 14 `CM_PROB_NEED_RESTART` | драйвер ждёт перезагрузки | шаг 10 (MSI) → перезагрузка |
 | Установщик: `-2146869243` / подпись `UnknownError` | нет корня Entrust.net (2048) | шаг 10 делает это сам; вручную — повторить шаг 10 |
@@ -330,10 +333,12 @@ failed to reset PCI device '0000:01:00.0', but trying to continue as not all dev
 .env.example         параметры хоста/ВМ и закреплённые версии (копия -> .env, в git не попадает)
 lib/common.sh        общие функции: логи, PASS/FAIL, ожидание агента, gx, guest_ps, снапшоты
 lib/gx_decode.py     декодер вывода гостя (CP866/UTF-8 -> UTF-8)
+lib/rom_check.py     проверка дампа ROM/VBIOS (образы, контрольные суммы, UEFI GOP)
 host/NN-*.sh         шаги 1-12, запускаются на хосте по порядку
-host/*.sh            вспомогательные: gpu-status, diag-gpu, gx-test, rescue-bsod-loop, fix-msi, rollback
+host/*.sh            вспомогательные: gpu-status, diag-gpu, dump-vbios, gx-test, rescue-bsod-loop, fix-msi, rollback
 guest/*.ps1          PowerShell для гостя (ASCII), копируются и запускаются через агента
 logs/                логи запусков (в git не попадают)
+tools/               сторонние утилиты, например nvflash.zip (в git не попадают)
 ```
 
 ## Ссылки
