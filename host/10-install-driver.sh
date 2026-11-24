@@ -8,6 +8,7 @@
 #   3. pre-create MSI keys, run the installer detached (-s -noreboot), poll its exit code
 #   4. re-apply MSI (installer may delete it), RDP policies, nvlddmkm Start=3
 #   5. reboot the VM -> host/11-verify-gpu.sh
+# NV_CLEAN_INSTALL=1 (.env) adds -clean: replaces an already installed driver of any version.
 source "$(dirname "$0")/../lib/common.sh"
 init
 require_vars VMID NV_FILE NV_SHA256 NV_LABEL GUEST_DIR
@@ -58,8 +59,13 @@ guest_ps enable-msi.ps1 || warn "enable-msi returned non-zero (re-applied after 
 
 step "Running the installer detached (silent, -noreboot) - ~5 min"
 guest_push "$GUEST_PS_DIR/run-installer.ps1" "$GUEST_DIR\\run-installer.ps1"
+inst_args=(-Dir "$DRV_DIR" -FileName "$NV_FILE" -Mode "$MODE")
+if [[ ${NV_CLEAN_INSTALL:-0} == 1 ]]; then
+  inst_args+=(-Clean)
+  info "clean install (-clean): the installed NVIDIA driver is replaced"
+fi
 pid=$(gx_detach -- powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-  -File "$GUEST_DIR\\run-installer.ps1" -Dir "$DRV_DIR" -FileName "$NV_FILE" -Mode "$MODE")
+  -File "$GUEST_DIR\\run-installer.ps1" "${inst_args[@]}")
 info "guest pid: ${pid:-?}"
 
 t=0 code=""

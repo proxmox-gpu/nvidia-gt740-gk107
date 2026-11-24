@@ -4,7 +4,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$Dir,
   [Parameter(Mandatory = $true)][string]$FileName,
-  [ValidateSet('full', 'driver-only')][string]$Mode = 'full'
+  [ValidateSet('full', 'driver-only')][string]$Mode = 'full',
+  [switch]$Clean
 )
 $ErrorActionPreference = 'Stop'
 
@@ -18,6 +19,9 @@ if ($Mode -eq 'driver-only') {
   $setup = Join-Path $Dir $FileName
   $argList = @('-s', '-noreboot')
 }
+# -clean = "Perform a clean installation": previous NVIDIA driver and settings are removed
+# first; needed to replace an installed driver by another (also older) version
+if ($Clean) { $argList += '-clean' }
 
 Set-Content -Path (Join-Path $Dir 'install-start.txt') -Value (Get-Date -Format o) -Encoding ascii
 try {
